@@ -1,0 +1,190 @@
+﻿@page "/"
+@inject IAIService AIService
+@inject IJSRuntime JSRuntime
+@rendermode InteractiveServer
+
+
+<PageTitle>AI Site Generator</PageTitle>
+
+<div class="container-fluid p-4">
+    <h1>AI Site Generator</h1>
+
+    <div class="mb-3">
+        @if (!isContentLoaded)
+        {
+            <button class="btn btn-primary" @onclick="@GenerateSite" disabled="@isLoading">
+                <span>Generate Site</span>
+            </button>
+        }
+        else
+        {
+            <button class="btn btn-secondary" @onclick="@ResetSite">Reset</button>
+        }
+    </div>
+
+    @if (errorMessage != null)
+    {
+        <div class="alert alert-danger" role="alert">
+            @errorMessage
+        </div>
+    }
+
+    <div id="content-wrapper" class="border rounded p-3" style="min-height: 400px; background-color: #f8f9fa;">
+        @if (isContentLoaded)
+        {
+            <div id="ai-content"></div>
+        }
+        else
+        {
+            <p class="text-muted">Click "Generate Site" to load AI-generated content</p>
+        }
+    </div>
+</div>
+
+@code {
+    private bool isLoading = false;
+    private bool isContentLoaded = false;
+    private string? errorMessage = null;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // Initialize the JavaScript interop with reference to this component
+            await JSRuntime.InvokeVoidAsync("window.initializeAIWrapper", DotNetObjectReference.Create(this));
+        }
+    }
+
+    private async Task GenerateSite()
+    {
+        isLoading = true;
+        errorMessage = null;
+        Console.WriteLine("The button has been clicked");
+        try
+        {
+            var prompt = @"Generate an interactive HTML page with CSS and JavaScript. 
+                          Include multiple buttons that will call window.regenerateAIContent() with different prompts to regenerate new content.
+                          Make it visually appealing with modern CSS.
+                          Example button: <button onclick='window.regenerateAIContent(""Create a calculator"")'>Show Calculator</button>";
+            Console.WriteLine(prompt);
+            var content = await AIService.GenerateContentAsync(prompt);
+            Console.WriteLine(content);
+            isContentLoaded = true;
+            await InvokeAsync(StateHasChanged);
+            await RenderAIContent(content);
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error generating site: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task RenderAIContent(AIGeneratedContent content)
+    {
+// Use JavaScript interop to inject the content
+        await JSRuntime.InvokeVoidAsync("window.renderAIContent", content.Html, content.Css, content.Js);
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public async Task RegenerateContent(string prompt)
+    {
+        isLoading = true;
+        StateHasChanged();
+
+        try
+        {
+            var content = await AIService.GenerateContentAsync(prompt);
+            await RenderAIContent(content);
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error regenerating content: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void ResetSite()
+    {
+        isContentLoaded = false;
+        errorMessage = null;
+        JSRuntime.InvokeVoidAsync("window.clearAIContent");
+        StateHasChanged();
+    }
+
+}
+
+<script>
+    window.initializeAIWrapper = (dotNetRef) => {
+        window.blazorRef = dotNetRef;
+    };
+
+    window.renderAIContent = (html, css, js) => {
+        console.log('renderAIContent', html, css, js);
+        const wrapper = document.getElementById('ai-content');
+        if (!wrapper) return;
+        wrapper.innerHTML = '';
+        if (css) {
+            const styleElement = document.createElement('style');
+            styleElement.textContent = css;
+            wrapper.appendChild(styleElement);
+        }
+        const contentDiv = document.createElement('div');
+        contentDiv.innerHTML = html || '';
+        wrapper.appendChild(contentDiv);
+        if (js) {
+            const scriptElement = document.createElement('script');
+            scriptElement.textContent = `
+      (function() {
+        window.regenerateAIContent = async (prompt) => {
+          if (window.blazorRef) {
+            await window.blazorRef.invokeMethodAsync('RegenerateContent', prompt || 'Generate new interactive content with buttons');
+          }
+        };
+        ${js}
+      })();
+    `;
+            wrapper.appendChild(scriptElement);
+        }
+        const buttons = wrapper.querySelectorAll('button[data-regenerate]');
+        buttons.forEach(button => {
+            button.addEventListener('click', () => {
+                const prompt = button.getAttribute('data-prompt') || 'Generate new interactive content';
+                window.regenerateAIContent(prompt);
+            });
+        });
+    };
+
+
+    window.clearAIContent = () => {
+        const wrapper = document.getElementById('ai-content');
+        if (wrapper) {
+            wrapper.innerHTML = '';
+        }
+    };
+</script>
+
+<style>
+    #content-wrapper {
+        position: relative;
+        overflow: auto;
+    }
+
+    #ai-content {
+        width: 100%;
+    }
+
+    .spinner-border-sm {
+        width: 1rem;
+        height: 1rem;
+        border-width: 0.2em;
+    }
+</style>
